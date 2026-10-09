@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'"><link rel="stylesheet" href="ui.css"></head>
+<body><div class="panel" id="panel">
+ <header class="top" title="拖动这里移动窗口；右键打开设置">
+  <div class="summary"><div class="label"><span id="apiDot" class="dot"></span>API 余额</div><div class="number" id="apiBalance">等待同步</div></div>
+  <div class="summary"><div class="label"><span id="vpnDot" class="dot vpn"></span>VPN 剩余</div><div class="number" id="vpnBalance">等待同步</div></div>
+  <button class="toggle" id="toggle" title="查看详情" aria-label="查看详情" aria-expanded="false" aria-controls="detail"><i data-lucide="panel-bottom" aria-hidden="true"></i></button>
+ </header>
+ <section class="detail" id="detail" hidden>
+  <div class="tabs" role="tablist" aria-label="账户详情"><button id="apiTab" class="active" role="tab" aria-selected="true" aria-controls="content">API 用量</button><button id="vpnTab" role="tab" aria-selected="false" aria-controls="content" tabindex="-1">VPN 流量</button></div>
+  <div class="scroll" id="scroll"><div id="content" role="tabpanel" aria-labelledby="apiTab"></div></div>
+  <footer><div class="status" id="status" role="status" aria-live="polite">等待同步</div><div class="actions">
+   <button id="login"><i data-lucide="user-round" aria-hidden="true"></i><span id="accountLabel">账户</span></button>
+   <button id="refresh"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
+   <button id="website"><i data-lucide="external-link" aria-hidden="true"></i><span>网站</span></button>
+   <button id="settings" title="设置，也可右键面板" aria-label="设置"><i data-lucide="settings-2" aria-hidden="true"></i></button>
+  </div></footer>
+ </section>
+</div><script src="lucide.js"></script><script src="ui.js"></script></body></html>

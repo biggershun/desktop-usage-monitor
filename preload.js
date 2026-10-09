@@ -1,0 +1,1 @@
+const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('monitor',{expand:v=>ipcRenderer.send('expand',v),action:(a,k)=>ipcRenderer.send('action',a,k),onData:fn=>ipcRenderer.on('data',(_,k,d)=>fn(k,d)),onLayout:fn=>ipcRenderer.on('layout',(_,d)=>fn(d))});

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+lucide.js
+.*-profile/
+.parser-test/
+*-result.json
+preview-*.png
+*.log
+*.bin
+*.exe
+*.zip
+.env
+.env.*
+.DS_Store
+Thumbs.db
