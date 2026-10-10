@@ -2,7 +2,7 @@ name: Windows Build
 
 on:
   push:
-    branches: [main]
+    branches: [master, main]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -22,7 +22,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run test:parser
-      - run: npm run test:ui
+      - run: node -e "if (!require('./parser-result.json').passed) process.exit(1)"
       - run: npm run pack
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
