@@ -3,9 +3,11 @@ const {app,BrowserWindow,session,ipcMain,screen,Menu,Tray,nativeImage,shell,safe
 const fs=require('fs'),path=require('path');
 const queries={api:fs.readFileSync(path.join(__dirname,'api-query.js'),'utf8'),vpn:fs.readFileSync(path.join(__dirname,'vpn-query.js'),'utf8')};
 const {createRefreshController}=require('./refresh-controller');
+const {createCookieSession}=require('./cookie-session');
 const {WIDTH,COLLAPSED_HEIGHT,clampAnchor,snapAnchor,layout}=require('./geometry');
 const configs={api:{name:'To-Tokens',url:'https://totokens.cc/keys',folder:'totokens-monitor',partition:'totokens'},vpn:{name:'FlowerCloud',url:'https://api-flowercloud.com/clientarea.php',folder:'flowercloud-monitor',partition:'flowercloud'}};
 const sites={},controllers={},latest={},loading={},ready={},restoreAttempted={},reloadRequested={};
+let vpnSession,shuttingDown=false;
 let widget,tray,timer,moveTimer,anchor,expanded=false,direction,dragging=false;
 const launch=process.env.PORTABLE_EXECUTABLE_FILE||app.getPath('exe');
 const positionFile=path.join(app.getPath('userData'),'window-position.json');
@@ -23,7 +25,7 @@ function menu(){return Menu.buildFromTemplate([
 ]);}
 function savePosition(){try{fs.mkdirSync(path.dirname(positionFile),{recursive:true});fs.writeFileSync(positionFile,JSON.stringify({x:anchor.x,y:anchor.y}));}catch{}}
 function applyLayout(keepDirection=true){const next=layout(anchor,screen.getDisplayMatching(anchor).workArea,expanded,keepDirection?direction:undefined);anchor=next.anchor;direction=next.direction;widget.webContents.send('layout',next);widget.setBounds(next.bounds);}
-function requestRefresh(k,reload=true){if(reload&&k==='vpn'&&!controllers[k]?.busy)reloadRequested[k]=true;controllers[k]?.run();}
+function requestRefresh(k,reload=true){if(shuttingDown)return;if(reload&&k==='vpn'&&!controllers[k]?.busy)reloadRequested[k]=true;controllers[k]?.run();}
 const tokenFile=path.join(app.getPath('appData'),'totokens-monitor','session.bin');
 async function restoreApi(w){if(restoreAttempted.api)return;restoreAttempted.api=true;try{if(!safeStorage.isEncryptionAvailable())return;const stored=JSON.parse(safeStorage.decryptString(fs.readFileSync(tokenFile)));const saved=Object.fromEntries(['auth_token','refresh_token','token_expires_at','auth_user'].filter(k=>typeof stored[k]==='string').map(k=>[k,stored[k]]));await w.webContents.executeJavaScript(`(()=>{if(!localStorage.getItem('auth_token')){const saved=${JSON.stringify(saved)};for(const [key,value]of Object.entries(saved))localStorage.setItem(key,value);}})()`);}catch{}}
 function waitForDocument(w,k,url){return new Promise((resolve,reject)=>{
@@ -33,7 +35,7 @@ function waitForDocument(w,k,url){return new Promise((resolve,reject)=>{
  wc.on('dom-ready',done);wc.on('did-fail-load',fail);timer=setTimeout(()=>{cleanup();wc.stop();reject(Error('网站加载超时，请重试'));},18000);
  if(url)w.loadURL(url).catch(()=>{});else if(ready[k])done();
 });}
-app.whenReady().then(()=>{
+app.whenReady().then(async()=>{
  const area=screen.getPrimaryDisplay().workArea;anchor={x:area.x+area.width-WIDTH-8,y:area.y+40,width:WIDTH,height:COLLAPSED_HEIGHT};
  try{const saved=JSON.parse(fs.readFileSync(positionFile,'utf8'));if(Number.isFinite(saved.x)&&Number.isFinite(saved.y))anchor=clampAnchor({...anchor,...saved},screen.getDisplayMatching({...anchor,...saved}).workArea);}catch{}
  widget=new BrowserWindow({...anchor,frame:false,transparent:true,alwaysOnTop:true,resizable:false,skipTaskbar:true,webPreferences:{preload:path.join(__dirname,'preload.js'),sandbox:true,contextIsolation:true}});widget.loadFile('index.html');
@@ -43,6 +45,10 @@ app.whenReady().then(()=>{
  widget.on('moved',()=>{if(!dragging)return;clearTimeout(moveTimer);moveTimer=setTimeout(()=>{dragging=false;anchor=snapAnchor(anchor,screen.getDisplayMatching(anchor).workArea);applyLayout(false);savePosition();},160);});
  for(const [k,c]of Object.entries(configs)){
   const s=session.fromPath(path.join(app.getPath('appData'),c.folder,'Partitions',c.partition));
+  if(k==='vpn'){
+   vpnSession=createCookieSession({session:s,file:path.join(app.getPath('appData'),c.folder,'session.bin'),encryption:safeStorage,url:c.url});
+   await vpnSession.restore();
+  }
   const w=sites[k]=new BrowserWindow({width:1100,height:780,show:false,webPreferences:{session:s,sandbox:true,contextIsolation:true,nodeIntegration:false}});
   w.webContents.setWindowOpenHandler(({url})=>{if(url.startsWith('https://'))shell.openExternal(url);return {action:'deny'};});
   controllers[k]=createRefreshController({
@@ -54,7 +60,7 @@ app.whenReady().then(()=>{
     return w.webContents.executeJavaScript(queries[k]);
    },navigate:target=>{if(new URL(target).origin!==new URL(c.url).origin)throw Error('套餐地址异常');return waitForDocument(w,k,target);},
    onLoading:value=>setLoading(k,value),onTimeout:()=>w.webContents.stop(),
-   onData:d=>{if(d.auth){try{if(safeStorage.isEncryptionAvailable())fs.writeFileSync(tokenFile,safeStorage.encryptString(JSON.stringify(d.auth)));}catch{}delete d.auth;}w.webContents.session.flushStorageData();latest[k]=d.error?{...latest[k],...d}:d;emit(k,d);}
+   onData:d=>{if(shuttingDown)return;if(d.auth){try{if(safeStorage.isEncryptionAvailable())fs.writeFileSync(tokenFile,safeStorage.encryptString(JSON.stringify(d.auth)));}catch{}delete d.auth;}if(k==='vpn'&&!d.error)vpnSession.setAuthenticated(!d.login);w.webContents.session.flushStorageData();latest[k]=d.error?{...latest[k],...d}:d;emit(k,d);}
   });
   w.webContents.on('did-start-navigation',(_event,_url,inPlace,isMain)=>{if(isMain&&!inPlace)ready[k]=false;});
   w.webContents.on('dom-ready',()=>{ready[k]=true;if(!controllers[k].busy)requestRefresh(k,false);});
@@ -68,6 +74,13 @@ app.whenReady().then(()=>{
  screen.on('display-metrics-changed',()=>applyLayout(false));screen.on('display-removed',()=>applyLayout(false));
 });
 ipcMain.on('expand',(event,value)=>{if(event.sender!==widget?.webContents)return;clearTimeout(moveTimer);dragging=false;expanded=!!value;direction=undefined;applyLayout(false);});
-ipcMain.on('action',(event,a,k)=>{if(event.sender!==widget?.webContents)return;if(a==='menu')menu().popup({window:widget});else if(configs[k]){if(a==='login')sites[k].show();if(a==='website')shell.openExternal(configs[k].url);if(a==='refresh')requestRefresh(k);}});
-app.on('before-quit',()=>{app.quitting=true;clearInterval(timer);clearTimeout(moveTimer);if(anchor)savePosition();});app.on('window-all-closed',()=>app.quit());
+ipcMain.on('action',(event,a,k)=>{if(event.sender!==widget?.webContents||shuttingDown)return;if(a==='menu')menu().popup({window:widget});else if(configs[k]){if(a==='login')sites[k]?.show();if(a==='website')shell.openExternal(configs[k].url);if(a==='refresh')requestRefresh(k);}});
+app.on('before-quit',event=>{
+ if(app.quitting)return;event.preventDefault();if(shuttingDown)return;shuttingDown=true;
+ clearInterval(timer);clearTimeout(moveTimer);if(anchor)savePosition();
+ const flush=Promise.allSettled([vpnSession?.flush(),...Object.values(sites).map(w=>w.webContents.session.cookies.flushStore())]);
+ const deadline=setTimeout(finish,5000);
+ function finish(){if(app.quitting)return;clearTimeout(deadline);vpnSession?.dispose();app.quitting=true;app.quit();}
+ flush.then(finish);
+});app.on('window-all-closed',()=>app.quit());
 }

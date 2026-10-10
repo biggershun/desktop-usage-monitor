@@ -21,6 +21,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: npm run test:session
       - run: npm run test:parser
       - run: node -e "if (!require('./parser-result.json').passed) process.exit(1)"
       - run: npm run pack

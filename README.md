@@ -33,10 +33,12 @@ API 查询使用 `Asia/Shanghai` 当日范围，金额沿用网站美元单位�
 
 账户会话保存在当前 Windows 用户的应用数据目录中。API 会话备份使用 Electron `safeStorage` 的 Windows 加密机制保存，仅用于本机恢复；登录凭证不进入源码仓库。会话被网站撤销或过期后需要重新登录。
 
+VPN 登录成功后也会在本机加密备份网站 Cookie（包括仅在浏览器会话内有效的 Cookie），启动时在打开账户页面前恢复。备份最多保留七天，保留网站 Cookie 原有的有效期；主动退出网站账户会清除备份。网站服务器撤销或过期的会话不能通过备份恢复。
+
 为了兼容之前的两个独立插件，使用以下本地目录：
 
 - `%APPDATA%\totokens-monitor\Partitions\totokens` 与 `%APPDATA%\totokens-monitor\session.bin`
-- `%APPDATA%\flowercloud-monitor\Partitions\flowercloud`
+- `%APPDATA%\flowercloud-monitor\Partitions\flowercloud` 与 `%APPDATA%\flowercloud-monitor\session.bin`
 - `%APPDATA%\desktop-usage-monitor\window-position.json`
 
 ## 从源码运行

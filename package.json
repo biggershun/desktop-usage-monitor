@@ -1,6 +1,6 @@
 {
   "name": "desktop-usage-monitor",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Compact Windows desktop widget for To-Tokens API balance and FlowerCloud VPN traffic.",
   "private": true,
   "license": "MIT",
@@ -9,7 +9,8 @@
   "scripts": {
     "postinstall": "node scripts/copy-icons.cjs",
     "start": "electron .",
-    "test": "node refresh-test.cjs",
+    "test": "node refresh-test.cjs && node cookie-session-test.cjs",
+    "test:session": "node session-test-runner.cjs",
     "test:parser": "electron parser-test.cjs",
     "pack": "electron-builder --win portable",
     "pack:dir": "electron-builder --win --dir"
@@ -22,7 +23,7 @@
   "build": {
     "appId": "local.desktop.usage-monitor",
     "productName": "Usage Monitor",
-    "files": ["main.js", "preload.js", "geometry.js", "index.html", "ui.js", "ui.css", "lucide.js", "api-query.js", "vpn-query.js", "refresh-controller.js"],
+    "files": ["main.js", "preload.js", "geometry.js", "index.html", "ui.js", "ui.css", "lucide.js", "api-query.js", "vpn-query.js", "refresh-controller.js", "cookie-session.js"],
     "win": {"target": [{"target": "portable", "arch": ["x64"]}]},
     "artifactName": "Usage-Monitor-${version}-${arch}.${ext}",
     "compression": "normal"
