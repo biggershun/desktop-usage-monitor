@@ -1,27 +1,29 @@
 'use strict';
-const {app,session,safeStorage}=require('electron');
-const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const {app,session}=require('electron');
+const assert=require('node:assert/strict'),path=require('node:path');
 const {createCookieSession}=require('./cookie-session');
 const [phase,root]=process.argv.slice(2);
 app.setPath('userData',path.join(root,'profile'));
 app.whenReady().then(async()=>{
  try{
-  assert(safeStorage.isEncryptionAvailable());
   const s=session.fromPath(path.join(root,'cookies'));
   const url='https://api-flowercloud.com/';
-  const manager=createCookieSession({session:s,file:path.join(root,'session.bin'),encryption:safeStorage,url});
+  const manager=createCookieSession({session:s,url});
   if(phase==='seed'){
-   await s.cookies.set({url,name:'WHMCS-test',value:'test-only-session',secure:true,httpOnly:true,sameSite:'lax'});
-   await manager.setAuthenticated(true);await manager.flush();
-   assert(!fs.readFileSync(path.join(root,'session.bin')).includes(Buffer.from('test-only-session')));
+   // A real WHMCS session cookie carries no expiry of its own.
+   await s.cookies.set({url,name:'WHMCSUser',value:'test-only-session',secure:true,httpOnly:true,sameSite:'lax'});
+   await manager.flush();
+   const saved=(await s.cookies.get({url,name:'WHMCSUser'}))[0];
+   assert(saved.expirationDate>Date.now()/1000,'cookie must now carry an expiry');
+   assert.equal(saved.session,false,'cookie must no longer be a session cookie');
   }else{
-   // Simulate Chromium dropping a session cookie during application shutdown.
-   await s.cookies.remove(url,'WHMCS-test');
-   await manager.restore();
-   const saved=(await s.cookies.get({url,name:'WHMCS-test'}))[0];
-   assert.equal(saved.value,'test-only-session');assert(saved.httpOnly);assert(saved.secure);assert(saved.session);assert(saved.hostOnly);assert.equal(saved.sameSite,'lax');
-   await manager.setAuthenticated(false);
-   assert.equal(fs.existsSync(path.join(root,'session.bin')),false);
+   // The partition's own store is the only thing that carried state across the restart.
+   const restored=(await s.cookies.get({url,name:'WHMCSUser'}))[0];
+   assert(restored,'cookie must survive the restart without any backup file');
+   assert.equal(restored.value,'test-only-session');
+   assert(restored.httpOnly);assert(restored.secure);assert(restored.hostOnly);
+   assert.equal(restored.sameSite,'lax');
+   assert.equal(restored.domain,'api-flowercloud.com');
   }
   manager.dispose();console.log('PASS: Electron session '+phase);app.exit(0);
  }catch(e){console.error(e);app.exit(1);}

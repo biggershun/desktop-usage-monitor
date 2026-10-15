@@ -1,6 +1,6 @@
 {
   "name": "desktop-usage-monitor",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Compact Windows desktop widget for To-Tokens API balance and FlowerCloud VPN traffic.",
   "private": true,
   "license": "MIT",

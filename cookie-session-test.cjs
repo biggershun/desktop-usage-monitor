@@ -1,32 +1,91 @@
 'use strict';
-const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const assert=require('node:assert/strict');
 const {EventEmitter}=require('node:events');
 const {createCookieSession}=require('./cookie-session');
-const root=fs.mkdtempSync(path.join(os.tmpdir(),'usage-monitor-session-'));
-const file=path.join(root,'session.bin'),url='https://api-flowercloud.com/clientarea.php';
 const timestamp=1800000000000;
-const encryption={isEncryptionAvailable:()=>true,encryptString:s=>Buffer.from(s).map(v=>v^93),decryptString:b=>Buffer.from(b).map(v=>v^93).toString()};
+const TTL=365*86400;
 function fixture(initial=[]){
  const cookies=new EventEmitter();let values=initial,flushes=0;
- cookies.get=async()=>values;cookies.set=async c=>values.push({...c,domain:c.domain||new URL(c.url).hostname,hostOnly:!c.domain,session:c.expirationDate===undefined});cookies.flushStore=async()=>{flushes++;};
- const manager=createCookieSession({session:{cookies,flushStorageData(){}},file,encryption,url,now:()=>timestamp});
+ cookies.get=async()=>values;
+ cookies.set=async c=>{
+  // Mimic Electron: a set with expirationDate overwrites, without it stays a session cookie.
+  const domain=c.domain||new URL(c.url).hostname;
+  const idx=values.findIndex(v=>v.name===c.name&&(v.domain||domain)===domain&&v.path===(c.path||'/'));
+  const next={...c,domain,hostOnly:!c.domain,session:c.expirationDate===undefined};
+  if(idx===-1)values.push(next);else values[idx]=next;
+  cookies.emit('changed',{},next,'inserted',false);
+ };
+ cookies.flushStore=async()=>{flushes++;};
+ const manager=createCookieSession({session:{cookies,flushStorageData(){}},url:'https://api-flowercloud.com/clientarea.php',now:()=>timestamp});
  return {manager,cookies,get values(){return values;},replace:v=>{values=v;},get flushes(){return flushes;}};
 }
-const auth={name:'WHMCSsession',value:'test-only-secret',domain:'api-flowercloud.com',hostOnly:true,path:'/',secure:true,httpOnly:true,session:true,sameSite:'lax'};
+const auth={name:'WHMCSUser',value:'test-only-secret',domain:'api-flowercloud.com',hostOnly:true,path:'/',secure:true,httpOnly:true,session:true,sameSite:'lax'};
+const settle=()=>new Promise(r=>setTimeout(r,250));
 async function run(){
- const a=fixture([auth,{...auth,name:'expired',session:false,expirationDate:timestamp/1000-10},{...auth,name:'other-site',domain:'example.com'}]);
- await a.manager.setAuthenticated(true);await a.manager.flush();a.manager.dispose();
- assert(!fs.readFileSync(file).includes(Buffer.from(auth.value)));assert(a.flushes>0);
- const b=fixture();await b.manager.restore();
- assert.equal(b.values.length,1);assert.equal(b.values[0].value,auth.value);assert.equal(b.values[0].httpOnly,true);assert.equal(b.values[0].session,true);assert.equal(b.values[0].sameSite,'lax');assert.equal(b.values[0].domain,auth.domain);
- b.manager.dispose();
- const fresh=fixture([{...auth,value:'newer-cookie'}]);await fresh.manager.restore();assert.equal(fresh.values.length,1);assert.equal(fresh.values[0].value,'newer-cookie');fresh.manager.dispose();
- const rotation=fixture([auth]);await rotation.manager.setAuthenticated(true);rotation.replace([{...auth,value:'rotated'}]);rotation.cookies.emit('changed',{},auth);await rotation.manager.flush();rotation.manager.dispose();
- const c=fixture();await c.manager.restore();assert.equal(c.values[0].value,'rotated');await c.manager.setAuthenticated(false);assert.equal(fs.existsSync(file),false);c.manager.dispose();
- const logout=fixture();await logout.manager.restore();assert.equal(logout.values.length,0);logout.manager.dispose();
- fs.writeFileSync(file,encryption.encryptString(JSON.stringify({version:1,savedAt:timestamp-8*86400000,cookies:[auth]})));
- const expired=fixture();await expired.manager.restore();assert.equal(expired.values.length,0);expired.manager.dispose();
- fs.writeFileSync(file,'corrupt');const corrupt=fixture();await corrupt.manager.restore();assert.equal(corrupt.values.length,0);corrupt.manager.dispose();
- console.log('PASS: encrypted session restore, cookie rotation, expiry, fresh-cookie preservation and logout');
+ // A session cookie gains an explicit expiry so Chromium will persist it.
+ const a=fixture([auth]);await a.manager.flush();
+ assert.equal(a.values.length,1);
+ assert.equal(a.values[0].expirationDate,Math.floor(timestamp/1000)+TTL);
+ assert.equal(a.values[0].session,false);
+ assert.equal(a.values[0].value,auth.value);
+ a.manager.dispose();
+
+ // WHMCS randomises its session cookie name, so the prefix match is what matters.
+ const names=fixture(['PHPSESSID','WHMCSUser','WHMCSy551iLvnhYt7','whmcsinstanceid'].map(n=>({...auth,name:n})));
+ await names.manager.flush();
+ assert(names.values.every(c=>c.expirationDate===Math.floor(timestamp/1000)+TTL));
+ names.manager.dispose();
+
+ // Cloudflare and chat-widget cookies must stay session-scoped, not pinned for a year.
+ const foreign=fixture([{...auth,name:'cf_clearance'},{...auth,name:'crisp-client/session/abc'},{...auth,name:'tipsMd5'}]);
+ await foreign.manager.flush();
+ assert(foreign.values.every(c=>c.expirationDate===undefined));
+ foreign.manager.dispose();
+
+ // Already-persistent cookies and unrelated names are never rewritten.
+ const untouched=fixture([{...auth,expirationDate:999},{...auth,name:'cf_clearance'},{...auth,name:'other',domain:'example.com'}]);
+ await untouched.manager.flush();
+ assert.equal(untouched.values[0].expirationDate,999);
+ assert.equal(untouched.values[1].expirationDate,undefined);
+ assert.equal(untouched.values[2].expirationDate,undefined);
+ untouched.manager.dispose();
+
+ // Flags survive the rewrite, or the cookie becomes a different cookie.
+ const flags=fixture([auth]);await flags.manager.flush();
+ assert.equal(flags.values[0].httpOnly,true);
+ assert.equal(flags.values[0].secure,true);
+ assert.equal(flags.values[0].sameSite,'lax');
+ assert.equal(flags.values[0].domain,auth.domain);
+ flags.manager.dispose();
+
+ // Our own write re-enters 'changed' but must not loop.
+ const loop=fixture([auth]);loop.cookies.on('changed',()=>{});
+ await loop.manager.flush();await settle();
+ assert.equal(loop.values.length,1);
+ loop.manager.dispose();
+
+ // A cookie landing in the store fires 'changed'; the debounced path must pick it up
+ // without waiting for an explicit flush.
+ const rotation=fixture([auth]);
+ rotation.cookies.emit('changed',{},auth,'inserted',false);
+ await settle();
+ assert.equal(rotation.values[0].expirationDate,Math.floor(timestamp/1000)+TTL);
+ rotation.manager.dispose();
+
+ // A server-side rotation to a new session cookie is re-pinned with the new value.
+ const rotate=fixture([{...auth,value:'rotated',session:true,expirationDate:undefined}]);
+ await rotate.manager.flush();
+ assert.equal(rotate.values[0].value,'rotated');
+ assert.equal(rotate.values[0].expirationDate,Math.floor(timestamp/1000)+TTL);
+ rotate.manager.dispose();
+
+ // Removals and foreign domains are ignored.
+ const removed=fixture([auth]);
+ removed.cookies.emit('changed',{},auth,'explicit',true);
+ await settle();
+ assert.equal(removed.values[0].expirationDate,undefined);
+ removed.manager.dispose();
+
+ console.log('PASS: session cookies pinned, rotation preserved, flags retained, no rewrite loop');
 }
-run().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>fs.rmSync(root,{recursive:true,force:true}));
+run().catch(e=>{console.error(e);process.exitCode=1;});

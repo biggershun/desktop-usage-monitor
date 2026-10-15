@@ -33,12 +33,16 @@ API 查询使用 `Asia/Shanghai` 当日范围，金额沿用网站美元单位�
 
 账户会话保存在当前 Windows 用户的应用数据目录中。API 会话备份使用 Electron `safeStorage` 的 Windows 加密机制保存，仅用于本机恢复；登录凭证不进入源码仓库。会话被网站撤销或过期后需要重新登录。
 
-VPN 登录成功后也会在本机加密备份网站 Cookie（包括仅在浏览器会话内有效的 Cookie），启动时在打开账户页面前恢复。备份最多保留七天，保留网站 Cookie 原有的有效期；主动退出网站账户会清除备份。网站服务器撤销或过期的会话不能通过备份恢复。
+VPN 登录成功后，网站签发的会话 Cookie 会被补上一个长期有效期，由 Electron 存在本机分区目录中，因此关闭程序或重启电脑后登录状态仍在。补有效期只影响本机能保存多久，不改变网站服务器端的会话长度。
+
+要长期保持登录，请在账户窗口登录时**勾选「记住我」**。真正支撑长期登录的是网站签发的 `WHMCSUser`（有效期一年）；不勾选则只有短会话，过期后需要重新登录。
+
+网站可能开启会话 IP 校验：IP 地址变化（连接或断开 VPN、切换节点、更换网络）时服务器会作废会话，表现为需要重新登录。这是网站侧策略，客户端无法绕过；若频繁遇到，可联系服务商关闭该检查。
 
 为了兼容之前的两个独立插件，使用以下本地目录：
 
 - `%APPDATA%\totokens-monitor\Partitions\totokens` 与 `%APPDATA%\totokens-monitor\session.bin`
-- `%APPDATA%\flowercloud-monitor\Partitions\flowercloud` 与 `%APPDATA%\flowercloud-monitor\session.bin`
+- `%APPDATA%\flowercloud-monitor\Partitions\flowercloud`（VPN 登录 Cookie 由该分区的 Cookie 库直接保存）
 - `%APPDATA%\desktop-usage-monitor\window-position.json`
 
 ## 从源码运行

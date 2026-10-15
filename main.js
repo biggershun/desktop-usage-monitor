@@ -45,10 +45,7 @@ app.whenReady().then(async()=>{
  widget.on('moved',()=>{if(!dragging)return;clearTimeout(moveTimer);moveTimer=setTimeout(()=>{dragging=false;anchor=snapAnchor(anchor,screen.getDisplayMatching(anchor).workArea);applyLayout(false);savePosition();},160);});
  for(const [k,c]of Object.entries(configs)){
   const s=session.fromPath(path.join(app.getPath('appData'),c.folder,'Partitions',c.partition));
-  if(k==='vpn'){
-   vpnSession=createCookieSession({session:s,file:path.join(app.getPath('appData'),c.folder,'session.bin'),encryption:safeStorage,url:c.url});
-   await vpnSession.restore();
-  }
+  if(k==='vpn')vpnSession=createCookieSession({session:s,url:c.url});
   const w=sites[k]=new BrowserWindow({width:1100,height:780,show:false,webPreferences:{session:s,sandbox:true,contextIsolation:true,nodeIntegration:false}});
   w.webContents.setWindowOpenHandler(({url})=>{if(url.startsWith('https://'))shell.openExternal(url);return {action:'deny'};});
   controllers[k]=createRefreshController({
@@ -60,7 +57,7 @@ app.whenReady().then(async()=>{
     return w.webContents.executeJavaScript(queries[k]);
    },navigate:target=>{if(new URL(target).origin!==new URL(c.url).origin)throw Error('套餐地址异常');return waitForDocument(w,k,target);},
    onLoading:value=>setLoading(k,value),onTimeout:()=>w.webContents.stop(),
-   onData:d=>{if(shuttingDown)return;if(d.auth){try{if(safeStorage.isEncryptionAvailable())fs.writeFileSync(tokenFile,safeStorage.encryptString(JSON.stringify(d.auth)));}catch{}delete d.auth;}if(k==='vpn'&&!d.error)vpnSession.setAuthenticated(!d.login);w.webContents.session.flushStorageData();latest[k]=d.error?{...latest[k],...d}:d;emit(k,d);}
+   onData:d=>{if(shuttingDown)return;if(d.auth){try{if(safeStorage.isEncryptionAvailable())fs.writeFileSync(tokenFile,safeStorage.encryptString(JSON.stringify(d.auth)));}catch{}delete d.auth;}w.webContents.session.flushStorageData();latest[k]=d.error?{...latest[k],...d}:d;emit(k,d);}
   });
   w.webContents.on('did-start-navigation',(_event,_url,inPlace,isMain)=>{if(isMain&&!inPlace)ready[k]=false;});
   w.webContents.on('dom-ready',()=>{ready[k]=true;if(!controllers[k].busy)requestRefresh(k,false);});
